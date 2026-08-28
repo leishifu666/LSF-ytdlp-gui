@@ -1,7 +1,0 @@
-{
-  "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"sleep 3; powershell -Command \\\"\\nAdd-Type -AssemblyName UIAutomationClient, UIAutomationTypes\\n\\\\$root = [System.Windows.Automation.AutomationElement]::RootElement\\n\\\\$cond = New-Object Sy...",
-  "error": "Exit code 1\nNO URL BOX",
-  "timestamp": "2026-08-28T08:36:33.419Z",
-  "retry_count": 1
-}
