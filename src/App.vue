@@ -77,7 +77,13 @@ async function submit() {
   const opts: DownloadOptions = {
     format: FORMAT_MAP[quality.value],
   };
-  if (outputDir.value.trim()) opts.outputDir = outputDir.value.trim();
+  const dir = outputDir.value.trim();
+  if (dir) {
+    opts.outputDir = dir;
+    // Persist on submit too: change events alone can be missed (paste,
+    // programmatic fills), and this is the value actually used.
+    localStorage.setItem("outputDir", dir);
+  }
   if (quality.value === "audio") {
     opts.rawArgs = [opts.rawArgs, "-x", "--audio-format mp3"]
       .filter(Boolean)
