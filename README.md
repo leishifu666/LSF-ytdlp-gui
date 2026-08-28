@@ -1,4 +1,6 @@
-# yt-dlp GUI
+# LSF-ytdlp-gui
+
+[English](README.md) | [简体中文](README.zh-CN.md)
 
 A clean, fast desktop GUI for [yt-dlp](https://github.com/yt-dlp/yt-dlp), built with **Tauri 2 + Vue 3 + TypeScript**.
 
@@ -16,16 +18,37 @@ A clean, fast desktop GUI for [yt-dlp](https://github.com/yt-dlp/yt-dlp), built 
 - 🌐 i18n: 简体中文 / English, persisted per launch
 - 📦 **Zero-config install**: ships with `yt-dlp.exe` and `ffmpeg` bundled — install and it just works
 
-## Tech stack
+## Supported sites & platforms
 
-| Layer    | Choice                                        |
-| -------- | --------------------------------------------- |
-| Shell    | Tauri 2 (Rust) — thin backend, WebView2 UI    |
-| Frontend | Vue 3 + TypeScript + Vite                     |
-| Engine   | yt-dlp subprocess, machine-readable `--print` / `--progress-template` output (formats verified against real runs) |
-| Media    | ffmpeg (bundled) for muxing / audio extraction |
+**Sites:** anything [yt-dlp supports](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md) — thousands of them, including YouTube, Bilibili, TikTok, Twitter/X, Instagram, and Douyin. See the Douyin section below for the one site that needs extra setup.
 
-The Rust side does only what Rust is great at here: spawning processes, streaming/parsing stdout, managing the job table, and self-updating. All UI lives in Vue single-file components.
+**Desktop platforms:**
+
+| Platform | Status |
+| -------- | ------ |
+| Windows 10 / 11 | ✅ Supported (NSIS installer) |
+| macOS / Linux | 🚧 On the roadmap (dev builds work, packaging not yet set up) |
+
+## Downloading Douyin (抖音) videos
+
+Douyin requires **browser cookies** for its web API — without them yt-dlp fails with
+`Fresh cookies (not necessarily logged in) are needed`. No login is required; you just
+need a fresh set of cookies exported from your browser.
+
+The easiest way to export them is the [Cookie-Editor](https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm)
+extension (available for Chrome / Edge / Firefox):
+
+1. Open [douyin.com](https://www.douyin.com) in your browser and play any video once, so the site sets fresh cookies. Logging in is optional.
+2. Click the Cookie-Editor icon in the toolbar while on the douyin.com tab.
+3. Click **Export As → Netscape** — this copies a `cookies.txt`-format blob to your clipboard.
+4. In LSF-ytdlp-gui, paste it into the **Cookies** box.
+5. Paste the video URL (`https://www.douyin.com/video/<id>`) and download.
+
+Notes:
+
+- Cookies go stale after a while. If downloads suddenly fail, revisit douyin.com, play a video, and re-export.
+- Use **per-video links** (`douyin.com/video/<id>`). Profile-page URLs like `douyin.com/user/self?...&modal_id=...` are not supported by yt-dlp — if you only have one of those, copy the `modal_id` number from it and use `douyin.com/video/<modal_id>`.
+- Exported cookies may contain your login session. Don't share them.
 
 ## Development
 
@@ -59,6 +82,17 @@ pnpm tauri build
 
 Produces an NSIS installer under `src-tauri/target/release/bundle/nsis/`.
 
+## Tech stack
+
+| Layer    | Choice                                        |
+| -------- | --------------------------------------------- |
+| Shell    | Tauri 2 (Rust) — thin backend, WebView2 UI    |
+| Frontend | Vue 3 + TypeScript + Vite                     |
+| Engine   | yt-dlp subprocess, machine-readable `--print` / `--progress-template` output (formats verified against real runs) |
+| Media    | ffmpeg (bundled) for muxing / audio extraction |
+
+The Rust side does only what Rust is great at here: spawning processes, streaming/parsing stdout, managing the job table, and self-updating. All UI lives in Vue single-file components.
+
 ## Roadmap
 
 - [ ] Playlist picker (select which entries to download)
@@ -70,4 +104,4 @@ Produces an NSIS installer under `src-tauri/target/release/bundle/nsis/`.
 
 ## License
 
-MIT
+[MIT](LICENSE)

@@ -231,10 +231,11 @@ impl DownloadOptions {
                 let n = JOB_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let path = std::env::temp_dir()
                     .join(format!("ytdlp-gui-cookies-{n}.txt"));
-                // BOM makes yt-dlp read the file as UTF-8 regardless of locale.
-                let mut bytes = b"\xef\xbb\xbf".to_vec();
-                bytes.extend_from_slice(cookies.trim().as_bytes());
-                std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+                // yt-dlp rejects cookie files starting with a UTF-8 BOM
+                // ("does not look like a Netscape format cookies file"), so
+                // strip one if the paste came from a BOM-adding editor/exporter.
+                let content = strip_bom(cookies.trim());
+                std::fs::write(&path, content.as_bytes()).map_err(|e| e.to_string())?;
                 args.push("--cookies".into());
                 args.push(path.to_string_lossy().into_owned());
             }
@@ -246,6 +247,12 @@ impl DownloadOptions {
         }
         Ok(args)
     }
+}
+
+/// yt-dlp rejects cookie files starting with a UTF-8 BOM ("does not look like
+/// a Netscape format cookies file"), so strip one from pasted cookie text.
+fn strip_bom(s: &str) -> &str {
+    s.strip_prefix('\u{feff}').unwrap_or(s)
 }
 
 // ---------------------------------------------------------------------------
@@ -658,4 +665,32 @@ pub fn default_download_dir() -> Result<String, String> {
             .into_owned());
     }
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_bom_removes_leading_bom_only() {
+        assert_eq!(strip_bom("﻿abc"), "abc");
+        assert_eq!(strip_bom("abc"), "abc");
+        assert_eq!(strip_bom(""), "");
+        // a BOM elsewhere in the text is content, not a prefix
+        assert_eq!(strip_bom("a﻿b"), "a﻿b");
+    }
+
+    #[test]
+    fn cookie_options_strip_bom() {
+        let opts = DownloadOptions {
+            cookies: Some("﻿# Netscape HTTP Cookie File\n.douyin.com\tTRUE\t/\tTRUE\t1999999999\tttwid\tx".into()),
+            ..Default::default()
+        };
+        let args = opts.to_args().unwrap();
+        let i = args.iter().position(|a| a == "--cookies").unwrap();
+        let written = std::fs::read_to_string(&args[i + 1]).unwrap();
+        assert!(!written.starts_with('\u{feff}'));
+        assert!(written.starts_with("# Netscape"));
+        let _ = std::fs::remove_file(&args[i + 1]);
+    }
 }
