@@ -116,10 +116,15 @@ async function submit() {
   }
 }
 
+function rememberOutputDir(v: string) {
+  outputDir.value = v;
+  if (v.trim()) localStorage.setItem("outputDir", v.trim());
+}
+
 async function browse() {
   const { open } = await import("@tauri-apps/plugin-dialog");
-  const selected = await open({ directory: true, multiple: false });
-  if (typeof selected === "string") outputDir.value = selected;
+  const selected = await open({ directory: true, multiple: false, defaultPath: outputDir.value || undefined });
+  if (typeof selected === "string") rememberOutputDir(selected);
 }
 
 // ---------------------------------------------------------------------------
@@ -178,8 +183,11 @@ onMounted(async () => {
   });
   const existing = await listJobs();
   existing.forEach((j) => upsertJob({ ...j, downloaded: 0, total: null, speed: null, eta: null }));
-  // Pre-fill the save location with the user's Downloads folder once.
-  if (!outputDir.value.trim()) {
+  // Save location: remembered choice first, else the system Downloads folder.
+  const remembered = localStorage.getItem("outputDir");
+  if (remembered) {
+    outputDir.value = remembered;
+  } else {
     try {
       outputDir.value = await defaultDownloadDir();
     } catch {
@@ -411,7 +419,12 @@ const activeJobCount = computed(() => activeCount.value);
           <div class="field">
             <label class="field-label">{{ tr("outputDir") }}</label>
             <div class="dir-row">
-              <input class="dir-input" v-model="outputDir" spellcheck="false" />
+              <input
+                class="dir-input"
+                :value="outputDir"
+                spellcheck="false"
+                @change="rememberOutputDir(($event.target as HTMLInputElement).value)"
+              />
               <button class="btn ghost" @click="browse">{{ tr("chooseDir") }}</button>
             </div>
           </div>
