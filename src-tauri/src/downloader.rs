@@ -7,6 +7,66 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use tauri::{AppHandle, Emitter, State};
 
+/// Decode subprocess output to a Rust String. Normal case is UTF-8; if that
+/// fails (yt-dlp fell back to the console codepage), try GBK before falling
+/// back to lossy replacement — a mojibake path would point at a file that
+/// doesn't exist, breaking "show in folder".
+fn decode_output(bytes: &[u8]) -> String {
+    match std::str::from_utf8(bytes) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            #[cfg(windows)]
+            if let Some(s) = codepage_to_utf8(bytes, 936) {
+                return s;
+            }
+            String::from_utf8_lossy(bytes).into_owned()
+        }
+    }
+}
+
+/// Convert bytes in a Windows codepage (936 = GBK) to a UTF-8 String.
+#[cfg(windows)]
+fn codepage_to_utf8(bytes: &[u8], codepage: u32) -> Option<String> {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn MultiByteToWideChar(
+            codepage: u32,
+            flags: u32,
+            src: *const u8,
+            src_len: i32,
+            dst: *mut u16,
+            dst_len: i32,
+        ) -> i32;
+    }
+    unsafe {
+        let len = MultiByteToWideChar(
+            codepage,
+            0,
+            bytes.as_ptr(),
+            bytes.len() as i32,
+            std::ptr::null_mut(),
+            0,
+        );
+        if len <= 0 {
+            return None;
+        }
+        let mut wide = vec![0u16; len as usize];
+        let written = MultiByteToWideChar(
+            codepage,
+            0,
+            bytes.as_ptr(),
+            bytes.len() as i32,
+            wide.as_mut_ptr(),
+            len,
+        );
+        if written != len {
+            return None;
+        }
+        // UTF-16 → UTF-8 via String::from_utf16 (lossless for valid wide chars)
+        String::from_utf16(&wide).ok()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Data types shared with the frontend (serde-serializable)
 // ---------------------------------------------------------------------------
@@ -131,6 +191,11 @@ impl DownloadOptions {
             "--no-simulate".into(),
             "--progress".into(),
             "--newline".into(),
+            // The PyInstaller-packed exe ignores PYTHONUTF8 and prints the
+            // console codepage (GBK on zh-CN) when piped; only this flag
+            // reliably forces UTF-8 on stdout.
+            "--encoding".into(),
+            "utf-8".into(),
             "--print".into(),
             "before_dl:__ENTRY__|%(title)s".into(),
             "--print".into(),
@@ -160,8 +225,16 @@ impl DownloadOptions {
         }
         if let Some(cookies) = &self.cookies {
             if !cookies.trim().is_empty() {
-                let path = std::env::temp_dir().join("ytdlp-gui-cookies.txt");
-                std::fs::write(&path, cookies.trim()).map_err(|e| e.to_string())?;
+                // Per-job file: jobs run concurrently and share nothing.
+                static JOB_SEQ: std::sync::atomic::AtomicU32 =
+                    std::sync::atomic::AtomicU32::new(0);
+                let n = JOB_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let path = std::env::temp_dir()
+                    .join(format!("ytdlp-gui-cookies-{n}.txt"));
+                // BOM makes yt-dlp read the file as UTF-8 regardless of locale.
+                let mut bytes = b"\xef\xbb\xbf".to_vec();
+                bytes.extend_from_slice(cookies.trim().as_bytes());
+                std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
                 args.push("--cookies".into());
                 args.push(path.to_string_lossy().into_owned());
             }
@@ -357,8 +430,23 @@ fn run_job(
                 Err(_) => break,
             }
         }
-        let text = String::from_utf8_lossy(&buf);
-        for line in text.lines() {
+        // Decode per line: yt-dlp prints titles in UTF-8 (--encoding) but file
+        // paths through os.fsdecode in the console codepage (GBK on zh-CN), so
+        // the two lines in one download can have different encodings.
+        let mut lines_text = String::new();
+        let mut line_start = 0usize;
+        for (i, &b) in buf.iter().enumerate() {
+            if b == b'\n' {
+                let raw = &buf[line_start..i];
+                lines_text.push_str(&decode_output(raw));
+                lines_text.push('\n');
+                line_start = i + 1;
+            }
+        }
+        if line_start < buf.len() {
+            lines_text.push_str(&decode_output(&buf[line_start..]));
+        }
+        for line in lines_text.lines() {
             if let Some(body) = line.strip_prefix("__ENTRY__|") {
                 title = Some(body.to_string());
                 manager.update_info(id, |j| j.title = Some(body.to_string()));
@@ -488,7 +576,11 @@ pub fn clear_finished(manager: State<JobManager>) {
 #[tauri::command]
 pub fn fetch_info(url: String) -> Result<serde_json::Value, String> {
     let mut cmd = Command::new(resolve_binary());
-    cmd.arg("-J").arg("--no-warnings").arg(url.trim());
+    cmd.arg("-J")
+        .arg("--no-warnings")
+        .arg("--encoding")
+        .arg("utf-8")
+        .arg(url.trim());
     if let Some(ffmpeg_dir) = resolve_ffmpeg_dir() {
         cmd.arg("--ffmpeg-location").arg(&ffmpeg_dir);
     }
@@ -499,11 +591,11 @@ pub fn fetch_info(url: String) -> Result<serde_json::Value, String> {
     }
     let output = cmd.output().map_err(|e| format!("failed to run yt-dlp: {e}"))?;
     if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
+        let err = decode_output(&output.stderr);
         let last = err.lines().last().unwrap_or("failed to fetch info").to_string();
         return Err(last);
     }
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = decode_output(&output.stdout);
     serde_json::from_str(&stdout).map_err(|e| format!("failed to parse metadata: {e}"))
 }
 

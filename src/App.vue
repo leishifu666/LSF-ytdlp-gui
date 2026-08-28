@@ -65,6 +65,15 @@ async function analyze() {
 async function submit() {
   const u = url.value.trim();
   if (!u) return;
+  const cookiesTrimmed = cookies.value.trim();
+  // yt-dlp only reads Netscape-format cookies; reject JSON exports up front.
+  if (cookiesTrimmed && cookiesTrimmed.startsWith("[")) {
+    infoError.value =
+      locale.value === "zh"
+        ? "Cookies 格式错误：检测到 JSON。请使用浏览器插件的「Netscape 格式 / cookies.txt」导出。"
+        : "Invalid cookies: JSON detected. Export as Netscape format (cookies.txt) from your browser extension.";
+    return;
+  }
   const opts: DownloadOptions = {
     format: FORMAT_MAP[quality.value],
   };
@@ -79,7 +88,7 @@ async function submit() {
       .filter(Boolean)
       .join(" ");
   }
-  if (cookies.value.trim()) opts.cookies = cookies.value.trim();
+  if (cookiesTrimmed) opts.cookies = cookiesTrimmed;
 
   startedThisSubmit.value = true;
   try {
