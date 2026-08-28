@@ -16,6 +16,8 @@ export interface DownloadProgress {
   eta: number | null;
   status: JobStatus;
   message: string | null;
+  title?: string | null;
+  filepath?: string | null;
 }
 
 export interface JobInfo {

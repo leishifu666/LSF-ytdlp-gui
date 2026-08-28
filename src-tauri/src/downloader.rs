@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader};
+use std::io::BufReader;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -32,6 +32,10 @@ pub struct DownloadProgress {
     pub eta: Option<u64>,
     pub status: JobStatus,
     pub message: Option<String>,
+    /// Set when the backend learns the video title / final file path, so the
+    /// UI can update the job card without a full list_jobs round-trip.
+    pub title: Option<String>,
+    pub filepath: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -94,6 +98,13 @@ impl JobManager {
             None
         }
     }
+
+    fn is_cancelled(&self, id: u32) -> bool {
+        let jobs = self.jobs.lock().unwrap();
+        jobs.get(&id)
+            .map(|js| js.lock().unwrap().info.status == JobStatus::Cancelled)
+            .unwrap_or(false)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -138,6 +149,13 @@ impl DownloadOptions {
             if !dir.trim().is_empty() {
                 args.push("--paths".into());
                 args.push(dir.trim().into());
+            }
+        } else if let Some(home) = std::env::var("USERPROFILE").ok() {
+            // No explicit location chosen → save to the user's Downloads folder.
+            let downloads = PathBuf::from(home).join("Downloads");
+            if downloads.is_dir() {
+                args.push("--paths".into());
+                args.push(downloads.to_string_lossy().into_owned());
             }
         }
         if let Some(cookies) = &self.cookies {
@@ -232,10 +250,20 @@ fn parse_progress_line(id: u32, body: &str) -> Option<DownloadProgress> {
         eta: parse_optional(p[5]).map(|v| v as u64),
         status: JobStatus::Downloading,
         message: None,
+        title: None,
+        filepath: None,
     })
 }
 
-fn emit_status(app: &AppHandle, id: u32, status: JobStatus, message: Option<String>) {
+#[allow(clippy::too_many_arguments)]
+fn emit_status(
+    app: &AppHandle,
+    id: u32,
+    status: JobStatus,
+    message: Option<String>,
+    title: Option<String>,
+    filepath: Option<String>,
+) {
     let _ = app.emit(
         "download-status",
         DownloadProgress {
@@ -246,6 +274,8 @@ fn emit_status(app: &AppHandle, id: u32, status: JobStatus, message: Option<Stri
             eta: None,
             status,
             message,
+            title,
+            filepath,
         },
     );
 }
@@ -268,7 +298,7 @@ fn run_job(
                 j.status = JobStatus::Error;
                 j.error = Some(e.clone());
             });
-            emit_status(&app, id, JobStatus::Error, Some(e));
+            emit_status(&app, id, JobStatus::Error, Some(e), None, None);
             return;
         }
     };
@@ -278,6 +308,9 @@ fn run_job(
         .arg(&url)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // yt-dlp writes non-ASCII paths (e.g. D:\下载\…) in the console codepage
+    // when piped, which breaks UTF-8 line parsing; force UTF-8 output.
+    cmd.env("PYTHONUTF8", "1").env("PYTHONIOENCODING", "utf-8");
     if let Some(ffmpeg_dir) = resolve_ffmpeg_dir() {
         cmd.arg("--ffmpeg-location").arg(&ffmpeg_dir);
     }
@@ -287,7 +320,7 @@ fn run_job(
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
 
-    emit_status(&app, id, JobStatus::Resolving, None);
+    emit_status(&app, id, JobStatus::Resolving, None, None, None);
 
     let mut child = match cmd.spawn() {
         Ok(c) => c,
@@ -297,7 +330,7 @@ fn run_job(
                 j.status = JobStatus::Error;
                 j.error = Some(msg.clone());
             });
-            emit_status(&app, id, JobStatus::Error, Some(msg));
+            emit_status(&app, id, JobStatus::Error, Some(msg), None, None);
             return;
         }
     };
@@ -311,16 +344,28 @@ fn run_job(
     let mut filepath: Option<String> = None;
 
     if let Some(stdout) = stdout {
-        let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            let Ok(line) = line else { break };
+        // Read raw bytes and decode lossily: a hard error from lines() on a
+        // stray non-UTF-8 byte would silently truncate the stream.
+        use std::io::Read;
+        let mut reader = BufReader::new(stdout);
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 8192];
+        loop {
+            match reader.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                Err(_) => break,
+            }
+        }
+        let text = String::from_utf8_lossy(&buf);
+        for line in text.lines() {
             if let Some(body) = line.strip_prefix("__ENTRY__|") {
                 title = Some(body.to_string());
                 manager.update_info(id, |j| j.title = Some(body.to_string()));
             } else if let Some(body) = line.strip_prefix("__FILE__|") {
                 filepath = Some(body.to_string());
                 manager.update_info(id, |j| j.filepath = Some(body.to_string()));
-            } else if let Some(p) = parse_progress_line(id, &line) {
+            } else if let Some(p) = parse_progress_line(id, line) {
                 let _ = app.emit("download-progress", p);
             }
         }
@@ -343,7 +388,14 @@ fn run_job(
         Some(mut c) => c.wait().map(|s| s.success()).unwrap_or(false),
         None => false,
     };
-    let status = if exit_ok { JobStatus::Finished } else { JobStatus::Error };
+    let cancelled = manager.is_cancelled(id);
+    let status = if cancelled {
+        JobStatus::Cancelled
+    } else if exit_ok {
+        JobStatus::Finished
+    } else {
+        JobStatus::Error
+    };
 
     manager.update_info(id, |j| {
         j.status = status;
@@ -357,7 +409,14 @@ fn run_job(
             j.error = error_msg.clone();
         }
     });
-    emit_status(&app, id, status, if exit_ok { None } else { error_msg });
+    emit_status(
+        &app,
+        id,
+        status,
+        if exit_ok || cancelled { None } else { error_msg },
+        title,
+        filepath,
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -473,4 +532,38 @@ pub fn ytdlp_version() -> Result<serde_json::Value, String> {
 pub fn update_ytdlp_now() -> Result<String, String> {
     let dir = app_data_dir().ok_or("cannot resolve app-data dir")?;
     crate::updater::update_ytdlp(&dir)
+}
+
+/// Reveal a file or folder in Windows Explorer (selects the file).
+#[tauri::command]
+pub fn reveal_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .reveal_item_in_dir(&path)
+        .map_err(|e| format!("failed to reveal path: {e}"))
+}
+
+/// The user's Downloads folder — used as the default save location.
+#[tauri::command]
+pub fn default_download_dir() -> Result<String, String> {
+    // No winrt dependency; standard layout via known-folder env is unreliable,
+    // so query the shell for the real Downloads path.
+    let out = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            "(New-Object -ComObject Shell.Application).Namespace('shell:Downloads').Self.Path",
+        ])
+        .output()
+        .map_err(|e| format!("failed to query Downloads folder: {e}"))?;
+    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if path.is_empty() {
+        // fallback: %USERPROFILE%\Downloads
+        let profile = std::env::var("USERPROFILE").map_err(|e| e.to_string())?;
+        return Ok(PathBuf::from(profile)
+            .join("Downloads")
+            .to_string_lossy()
+            .into_owned());
+    }
+    Ok(path)
 }

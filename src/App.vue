@@ -9,6 +9,8 @@ import {
   fetchInfo,
   ytdlpVersion,
   updateYtdlpNow,
+  revealPath,
+  defaultDownloadDir,
   onProgress,
   onStatus,
 } from "./api";
@@ -160,11 +162,21 @@ onMounted(async () => {
     if (j) {
       j.status = p.status;
       if (p.message) j.error = p.message;
+      if (p.title) j.title = p.title;
+      if (p.filepath) j.filepath = p.filepath;
       upsertJob(j);
     }
   });
   const existing = await listJobs();
   existing.forEach((j) => upsertJob({ ...j, downloaded: 0, total: null, speed: null, eta: null }));
+  // Pre-fill the save location with the user's Downloads folder once.
+  if (!outputDir.value.trim()) {
+    try {
+      outputDir.value = await defaultDownloadDir();
+    } catch {
+      /* leave empty; backend still falls back to Downloads */
+    }
+  }
 });
 
 onUnmounted(() => {
@@ -487,6 +499,13 @@ const activeJobCount = computed(() => activeCount.value);
                 @click="cancel(j.id)"
               >
                 {{ tr("cancel") }}
+              </button>
+              <button
+                v-if="j.filepath"
+                class="btn ghost small"
+                @click="revealPath(j.filepath!)"
+              >
+                {{ tr("openLocation") }}
               </button>
             </div>
           </div>

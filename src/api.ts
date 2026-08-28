@@ -44,6 +44,16 @@ export function updateYtdlpNow(): Promise<string> {
   return invoke("update_ytdlp_now");
 }
 
+/** Reveal a file/folder in Explorer (selects the item). */
+export function revealPath(path: string): Promise<void> {
+  return invoke("reveal_path", { path });
+}
+
+/** The user's Downloads folder path. */
+export function defaultDownloadDir(): Promise<string> {
+  return invoke("default_download_dir");
+}
+
 export function onProgress(
   cb: (p: DownloadProgress) => void,
 ): Promise<UnlistenFn> {

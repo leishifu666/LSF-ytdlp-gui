@@ -18,6 +18,8 @@ pub fn run() {
             downloader::fetch_info,
             downloader::ytdlp_version,
             downloader::update_ytdlp_now,
+            downloader::reveal_path,
+            downloader::default_download_dir,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

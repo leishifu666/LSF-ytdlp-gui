@@ -26,3 +26,4 @@ dist-ssr
 # Binaries are large; fetch them via scripts/setup-binaries.(ps1|sh)
 src-tauri/binaries/ffmpeg/
 src-tauri/binaries/yt-dlp.exe
+.omc/
