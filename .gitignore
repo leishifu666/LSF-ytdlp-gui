@@ -30,3 +30,6 @@ src-tauri/binaries/yt-dlp.exe
 
 # Stray media files
 src-tauri/*.mp4
+
+# local release staging
+.release/

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, computed } from "vue";
+import { onMounted, onUnmounted, ref, shallowRef, computed } from "vue";
 import { useI18n } from "./i18n";
 import {
   startDownload,
@@ -269,7 +269,9 @@ async function doUpdate() {
 // ---------------------------------------------------------------------------
 
 const appVer = ref("");
-const appUpdate = ref<AppUpdate | null>(null);
+// shallowRef: the Update instance uses #private fields internally and breaks
+// if Vue wraps it in a deep reactive proxy.
+const appUpdate = shallowRef<AppUpdate | null>(null);
 const appUpdateChecked = ref(false);
 const checkingAppUpdate = ref(false);
 const appUpdateProgress = ref<number | null>(null); // percent while downloading
