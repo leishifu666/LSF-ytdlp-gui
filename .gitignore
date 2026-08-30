@@ -27,3 +27,6 @@ dist-ssr
 src-tauri/binaries/ffmpeg/
 src-tauri/binaries/yt-dlp.exe
 .omc/
+
+# Stray media files
+src-tauri/*.mp4

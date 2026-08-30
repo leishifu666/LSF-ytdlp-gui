@@ -1,5 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getVersion } from "@tauri-apps/api/app";
+import { check, type Update } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import type {
   DownloadOptions,
   DownloadProgress,
@@ -58,6 +61,27 @@ export function onProgress(
   cb: (p: DownloadProgress) => void,
 ): Promise<UnlistenFn> {
   return listen<DownloadProgress>("download-progress", (e) => cb(e.payload));
+}
+
+// ---------------------------------------------------------------------------
+// App self-update (Tauri updater plugin)
+// ---------------------------------------------------------------------------
+
+export type AppUpdate = Update;
+
+/** The running app's version from tauri.conf.json. */
+export function appVersion(): Promise<string> {
+  return getVersion();
+}
+
+/** Ask the update feed (GitHub releases) whether a newer app version exists. */
+export function checkAppUpdate(): Promise<AppUpdate | null> {
+  return check();
+}
+
+/** Restart the app (used after an update has been installed). */
+export function relaunchApp(): Promise<void> {
+  return relaunch();
 }
 
 export function onStatus(

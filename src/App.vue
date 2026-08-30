@@ -13,6 +13,10 @@ import {
   defaultDownloadDir,
   onProgress,
   onStatus,
+  appVersion,
+  checkAppUpdate,
+  relaunchApp,
+  type AppUpdate,
 } from "./api";
 import type { DownloadOptions, JobView, VideoInfo } from "./types";
 
@@ -200,6 +204,11 @@ onMounted(async () => {
       /* leave empty; backend still falls back to Downloads */
     }
   }
+  appVersion().then((v) => (appVer.value = v)).catch(() => {});
+  // Silent update check on startup (skipped in dev so it never nags while coding).
+  if (!import.meta.env.DEV) {
+    setTimeout(() => void checkAppUpdateNow(true), 3000);
+  }
 });
 
 onUnmounted(() => {
@@ -252,6 +261,69 @@ async function doUpdate() {
     updateMsg.value = `ERROR:${String(e)}`;
   } finally {
     updatingKernel.value = false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// App self-update state
+// ---------------------------------------------------------------------------
+
+const appVer = ref("");
+const appUpdate = ref<AppUpdate | null>(null);
+const appUpdateChecked = ref(false);
+const checkingAppUpdate = ref(false);
+const appUpdateProgress = ref<number | null>(null); // percent while downloading
+const appUpdateReady = ref(false); // downloaded+installed, restart pending
+const appUpdateError = ref<string | null>(null);
+
+async function checkAppUpdateNow(silent = false) {
+  checkingAppUpdate.value = true;
+  if (!silent) {
+    appUpdateError.value = null;
+    appUpdateChecked.value = false;
+    appUpdate.value = null;
+  }
+  try {
+    appUpdate.value = await checkAppUpdate();
+    appUpdateChecked.value = true;
+  } catch (e) {
+    if (!silent) appUpdateError.value = String(e);
+  } finally {
+    checkingAppUpdate.value = false;
+  }
+}
+
+async function installAppUpdate() {
+  const upd = appUpdate.value;
+  if (!upd) return;
+  appUpdateError.value = null;
+  appUpdateProgress.value = 0;
+  try {
+    let downloaded = 0;
+    let total = 0;
+    await upd.downloadAndInstall((event) => {
+      switch (event.event) {
+        case "Started":
+          total = event.data.contentLength ?? 0;
+          break;
+        case "Progress":
+          downloaded += event.data.chunkLength;
+          if (total > 0) {
+            appUpdateProgress.value = Math.min(
+              100,
+              Math.round((downloaded / total) * 100),
+            );
+          }
+          break;
+        case "Finished":
+          appUpdateProgress.value = 100;
+          break;
+      }
+    });
+    appUpdateReady.value = true;
+  } catch (e) {
+    appUpdateError.value = String(e);
+    appUpdateProgress.value = null;
   }
 }
 
@@ -343,6 +415,7 @@ const activeJobCount = computed(() => activeCount.value);
           @click="tab = 'settings'"
         >
           {{ tr("tabSettings") }}
+          <span v-if="appUpdate" class="dot" />
         </button>
       </nav>
       <div class="lang-switch">
@@ -563,6 +636,54 @@ const activeJobCount = computed(() => activeCount.value);
               >
                 English
               </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div>
+            <div class="field-label">{{ tr("appVersion") }}</div>
+            <div class="version-line">
+              <code class="version-code">v{{ appVer || "…" }}</code>
+              <button
+                class="btn ghost small"
+                :disabled="checkingAppUpdate"
+                @click="checkAppUpdateNow(false)"
+              >
+                {{ checkingAppUpdate ? tr("checking") : tr("checkUpdate") }}
+              </button>
+            </div>
+            <div v-if="appUpdate" class="update-status">
+              <span class="update-avail">
+                ↑ {{ tr("updateAvailable") }}: v{{ appUpdate.version }}
+              </span>
+              <button
+                v-if="!appUpdateReady"
+                class="btn primary small"
+                :disabled="appUpdateProgress !== null"
+                @click="installAppUpdate"
+              >
+                {{
+                  appUpdateProgress !== null
+                    ? appUpdateProgress + "%"
+                    : tr("updateNow")
+                }}
+              </button>
+              <button v-else class="btn primary small" @click="relaunchApp()">
+                {{ tr("restartNow") }}
+              </button>
+            </div>
+            <div
+              v-else-if="appUpdateChecked"
+              class="update-status"
+            >
+              ✓ {{ tr("upToDate") }}
+            </div>
+            <div
+              v-if="appUpdateError"
+              class="update-msg err"
+            >
+              {{ tr("updateFailed") + ": " + appUpdateError }}
             </div>
           </div>
         </div>

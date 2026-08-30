@@ -15,6 +15,7 @@
 - 👁️ 链接解析：下载前展示标题、作者、时长、封面
 - 📃 任务队列：并发下载、取消、清除已完成
 - 🔄 **应用内 yt-dlp 更新器** — 一键从 GitHub Releases 拉取最新 `yt-dlp.exe`（yt-dlp 迭代很快，这很重要）
+- ⬆️ **应用自更新** — 启动时自动检测新版本，设置页一键下载安装并重启（Tauri updater，更新包经签名校验）
 - 🌐 界面语言：简体中文 / English，按次启动记忆
 - 📦 **零配置安装**：自带 `yt-dlp.exe` 和 `ffmpeg` — 装完即用
 
@@ -52,13 +53,16 @@
 
 从 [Releases](https://github.com/leishifu666/LSF-ytdlp-gui/releases) 下载最新的 `*_x64-setup.exe`，双击安装即可。安装包自带 `yt-dlp.exe` 和 `ffmpeg`，无需任何额外配置。
 
+安装后无需手动盯新版本：应用启动时会自动检查更新，发现新版本后到「设置」页点击「立即更新」，下载完成后重启即完成升级。更新包带有签名校验，只接受本项目发布的版本。
+
 ## 开发
 
 环境要求：[Node.js](https://nodejs.org) ≥ 20、[pnpm](https://pnpm.io)、[Rust](https://rustup.rs)（stable，Windows 上需 MSVC 工具链）。
 
 ```bash
 pnpm install
-# 把 yt-dlp.exe 和 ffmpeg 放入 src-tauri/binaries（结构见下）
+# 首次构建前先下载捆绑的二进制（yt-dlp.exe / ffmpeg）：
+./scripts/setup-binaries.ps1   # PowerShell；bash 环境用 ./scripts/setup-binaries.sh
 pnpm tauri dev
 ```
 
@@ -84,6 +88,14 @@ pnpm tauri build
 
 产物为 NSIS 安装包，位于 `src-tauri/target/release/bundle/nsis/`。
 
+### 发布新版本
+
+1. 把 `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 里的 `version` 一起升到新版本，提交。
+2. 打 tag 并推送：`git tag vX.Y.Z && git push origin vX.Y.Z`。
+3. GitHub Actions（`.github/workflows/release.yml`）会自动构建、签名并创建 Release，附上安装包和供自动更新使用的 `latest.json`。
+
+签名密钥通过仓库 Secrets `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 提供（minisign 格式，`pnpm tauri signer generate` 生成）。私钥丢失后旧版本客户端将无法验证新更新，务必备份。
+
 ## 技术栈
 
 | 层       | 选择                                          |
@@ -101,7 +113,7 @@ Rust 侧只做 Rust 擅长的事：拉起进程、流式解析 stdout、管理�
 - [ ] 字幕选择 UI
 - [ ] 下载历史（SQLite）
 - [ ] 剪贴板监听 / 批量粘贴
-- [ ] 应用自更新（Tauri updater）
+- [x] 应用自更新（Tauri updater）
 - [ ] macOS / Linux 构建
 
 ## 许可证

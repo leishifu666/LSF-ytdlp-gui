@@ -15,6 +15,7 @@ A clean, fast desktop GUI for [yt-dlp](https://github.com/yt-dlp/yt-dlp), built 
 - 👁️ URL analysis: title, uploader, duration, thumbnail before downloading
 - 📃 Job queue: concurrent downloads, cancel, clear finished
 - 🔄 **In-app yt-dlp updater** — one click pulls the latest `yt-dlp.exe` from GitHub releases (yt-dlp moves fast; this matters)
+- ⬆️ **Self-updating app** — checks for new releases on startup; one click in Settings downloads, installs, and relaunches (Tauri updater with signed updates)
 - 🌐 i18n: 简体中文 / English, persisted per launch
 - 📦 **Zero-config install**: ships with `yt-dlp.exe` and `ffmpeg` bundled — install and it just works
 
@@ -54,13 +55,16 @@ Notes:
 
 Grab the latest `*_x64-setup.exe` from [Releases](https://github.com/leishifu666/LSF-ytdlp-gui/releases) and run it. The installer bundles `yt-dlp.exe` and `ffmpeg` — zero extra setup.
 
+No need to watch for new versions manually: the app checks for updates on startup, and when one is available you can install it from Settings with one click (updates are signature-verified).
+
 ## Development
 
 Prerequisites: [Node.js](https://nodejs.org) ≥ 20, [pnpm](https://pnpm.io), [Rust](https://rustup.rs) (stable, MSVC toolchain on Windows).
 
 ```bash
 pnpm install
-# put yt-dlp.exe and ffmpeg in src-tauri/binaries (see structure below)
+# fetch the bundled binaries (yt-dlp.exe / ffmpeg) before the first build:
+./scripts/setup-binaries.ps1   # PowerShell; use ./scripts/setup-binaries.sh on bash
 pnpm tauri dev
 ```
 
@@ -86,6 +90,14 @@ pnpm tauri build
 
 Produces an NSIS installer under `src-tauri/target/release/bundle/nsis/`.
 
+### Cutting a release
+
+1. Bump `version` in `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml` together, commit.
+2. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+3. GitHub Actions (`.github/workflows/release.yml`) builds, signs, and publishes the Release with the installer and the `latest.json` feed used by the auto-updater.
+
+Signing keys are provided via the repo Secrets `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (minisign format, generated with `pnpm tauri signer generate`). If the private key is lost, existing clients can no longer verify new updates — back it up.
+
 ## Tech stack
 
 | Layer    | Choice                                        |
@@ -103,7 +115,7 @@ The Rust side does only what Rust is great at here: spawning processes, streamin
 - [ ] Subtitle selection UI
 - [ ] Download history (SQLite)
 - [ ] Clipboard watch / batch paste
-- [ ] App self-update via Tauri updater
+- [x] App self-update via Tauri updater
 - [ ] macOS / Linux builds
 
 ## License
